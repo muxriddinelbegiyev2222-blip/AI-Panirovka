@@ -1,21 +1,4 @@
-# core/genome.py
-# -*- coding: utf-8 -*-
-"""
-Genom (Xromosoma) moduli — Genetik algoritmning DNKsi.
-
-Bu fayl xonalarni qanday qilib "gen" ko'rinishida saqlashni, ularni
-mutatsiyaga uchrashini (o'zgarishini) va krossover (chatishtirish) qilishni biladi.
-Har bir genom — bu bitta potentsial uy loyihasi.
-"""
-
-import random
-from typing import List, Dict, Tuple
-from core.models import RoomRequest, FloorGenome, HouseGenome
-from core.room_catalog import get_room_spec
-from config.settings import (
-    MIN_HALL_WIDTH, MAX_HALL_WIDTH, 
-    MIN_HALL_HEIGHT_RATIO, MAX_HALL_HEIGHT_RATIO
-)
+# ... faylning yuqori qismi (importlar) o'zgarishsiz qoladi ...
 
 # =============================================================================
 # 1. YANGI TASODIFIY GENOM YARATISH (INITIALIZATION)
@@ -26,33 +9,26 @@ def create_random_floor_genome(
     floor_index: int, 
     rng: random.Random
 ) -> FloorGenome:
-    """Bitta qavat uchun mutlaqo tasodifiy, lekin mantiqiy boshlang'ich genom yaratadi."""
     genome = FloorGenome(floor_index=floor_index)
     
-    # Xonalarni tasodifiy qanotlarga taqsimlash
     for req in requests:
         spec = get_room_spec(req.room_type)
         
-        # Ba'zi mantiqiy qoidalar (Xoll har doim markazda bo'lishi kerak)
         if req.room_type == "xoll":
-            genome.wing_assignment[req.room_type] = "center"
+            genome.wing_assignment[req.id] = "center"
             continue
             
-        # Tasodifiy tanlov, lekin xona turiga qarab ehtimollikni oshirish
         choices = ["left", "right", "top"]
-        weights = [0.4, 0.4, 0.2] # 40% chap, 40% o'ng, 20% tepa
+        weights = [0.4, 0.4, 0.2]
         
-        # Katta xonalar (mehmonxona, oshxona) ko'proq old/pastga (chap/o'ng) tushadi
         if spec.category in ("public", "wet"):
             weights = [0.45, 0.45, 0.1]
         elif spec.category == "private":
             weights = [0.35, 0.35, 0.3]
             
         wing = rng.choices(choices, weights=weights, k=1)[0]
-        genome.wing_assignment[req.room_type] = wing
-        
-        # Aylantirish (rotatsiya) ehtimoli 50%
-        genome.rotations[req.room_type] = rng.choice([True, False])
+        genome.wing_assignment[req.id] = wing
+        genome.rotations[req.id] = rng.choice([True, False])
 
     # Xonalarni tartibga solish (shuffle)
     ids = list(genome.wing_assignment.keys())
@@ -69,45 +45,12 @@ def create_random_floor_genome(
     rng.shuffle(genome.right_order)
     rng.shuffle(genome.top_order)
     
-    # Xoll o'lchamlari (mutatsiya uchun ochiq)
     genome.hall_w = rng.uniform(MIN_HALL_WIDTH, MAX_HALL_WIDTH)
     genome.hall_h_ratio = rng.uniform(MIN_HALL_HEIGHT_RATIO, MAX_HALL_HEIGHT_RATIO)
     
     return genome
 
-
-def create_random_house_genome(
-    requests: List[RoomRequest], 
-    floor_count: int, 
-    rng: random.Random
-) -> HouseGenome:
-    """Butun uy (1 yoki 2+ qavat) uchun boshlang'ich genom yaratadi."""
-    house_genome = HouseGenome()
-    
-    # Xonalarni qavatlarga taqsimlash (agar 2 qavat bo'lsa)
-    # (Hozircha oddiy mantiq: yotoqxonalar 2-qavatga, oshxona 1-qavatga)
-    floor_requests: Dict[int, List[RoomRequest]] = {i: [] for i in range(floor_count)}
-    
-    if floor_count == 1:
-        floor_requests[0] = requests
-    else:
-        for req in requests:
-            spec = get_room_spec(req.room_type)
-            if spec.preferred_floor == "upper" and floor_count > 1:
-                floor_requests[1].append(req)
-            elif spec.preferred_floor == "ground":
-                floor_requests[0].append(req)
-            else:
-                # 'any' bo'lsa tasodifiy
-                floor_requests[rng.randint(0, floor_count - 1)].append(req)
-
-    for f_idx in range(floor_count):
-        f_genome = create_random_floor_genome(floor_requests[f_idx], f_idx, rng)
-        house_genome.floor_genomes.append(f_genome)
-        
-    house_genome.staircase_slot = rng.choice(["left", "center", "right"])
-    return house_genome
-
+# ... create_random_house_genome o'zgarishsiz qoladi ...
 
 # =============================================================================
 # 2. MUTATSIYA (NASLNING O'ZGARISHI)
@@ -119,59 +62,54 @@ def mutate_floor_genome(
     rng: random.Random, 
     mutation_rate: float
 ) -> FloorGenome:
-    """Genomga tasodifiy mutatsiyalar kiritadi (evolyutsiya uchun)."""
     new_genome = genome.copy()
     
     if rng.random() > mutation_rate:
         return new_genome
 
-    # Mutatsiya turlari
     mutation_type = rng.choice([
-        "swap_order",      # 2 ta xonani o'rnini almashtirish
-        "change_wing",     # Xonani boshqa qanotga ko'chirish
-        "toggle_rotation", # Xonani 90 gradusga aylantirish
-        "change_hall"      # Xoll o'lchamini o'zgartirish
+        "swap_order", "change_wing", "toggle_rotation", "change_hall"
     ])
 
     if mutation_type == "swap_order":
-        # Tanlangan qanotdagi xonalar tartibini almashtirish
         lists = [new_genome.left_order, new_genome.right_order, new_genome.top_order]
-        target_list = rng.choice([l for l in lists if len(l) > 1])
-        if target_list:
+        valid_lists = [l for l in lists if len(l) > 1]
+        if valid_lists:
+            target_list = rng.choice(valid_lists)
             i, j = rng.sample(range(len(target_list)), 2)
             target_list[i], target_list[j] = target_list[j], target_list[i]
 
     elif mutation_type == "change_wing":
-        # Bitta xonani bir qanotdan boshqasiga ko'chirish
         all_rooms = new_genome.all_room_ids()
         if all_rooms:
             room_id = rng.choice(all_rooms)
-            if room_id == "xoll": return new_genome # Xollni ko'chirib bo'lmaydi
             
-            old_wing = new_genome.wing_assignment[room_id]
+            # Xollni ko'chirib bo'lmaydi
+            req = next((r for r in requests if r.id == room_id), None)
+            if req and req.room_type == "xoll":
+                return new_genome
+            
+            old_wing = new_genome.wing_assignment.get(room_id, "left")
             new_wing = rng.choice(["left", "right", "top"])
             
             if old_wing != new_wing:
-                # Eski ro'yxatdan o'chirish
-                if old_wing == "left": new_genome.left_order.remove(room_id)
-                elif old_wing == "right": new_genome.right_order.remove(room_id)
-                elif old_wing == "top": new_genome.top_order.remove(room_id)
+                # Xavfsiz o'chirish (agar ro'yxatda bo'lsa)
+                if old_wing == "left" and room_id in new_genome.left_order: new_genome.left_order.remove(room_id)
+                elif old_wing == "right" and room_id in new_genome.right_order: new_genome.right_order.remove(room_id)
+                elif old_wing == "top" and room_id in new_genome.top_order: new_genome.top_order.remove(room_id)
                 
-                # Yangi ro'yxatga qo'shish (tasodifiy joyga)
                 new_genome.wing_assignment[room_id] = new_wing
                 if new_wing == "left": new_genome.left_order.insert(rng.randint(0, len(new_genome.left_order)), room_id)
                 elif new_wing == "right": new_genome.right_order.insert(rng.randint(0, len(new_genome.right_order)), room_id)
                 elif new_wing == "top": new_genome.top_order.insert(rng.randint(0, len(new_genome.top_order)), room_id)
 
     elif mutation_type == "toggle_rotation":
-        # Xonaning eni va bo'yini almashtirish
         all_rooms = new_genome.all_room_ids()
         if all_rooms:
             room_id = rng.choice(all_rooms)
             new_genome.rotations[room_id] = not new_genome.rotations.get(room_id, False)
 
     elif mutation_type == "change_hall":
-        # Xollning parametrlarini siljitish
         if rng.random() < 0.5:
             new_genome.hall_w = max(MIN_HALL_WIDTH, min(MAX_HALL_WIDTH, new_genome.hall_w + rng.uniform(-0.5, 0.5)))
         else:
@@ -189,33 +127,39 @@ def crossover_house_genomes(
     parent2: HouseGenome, 
     rng: random.Random
 ) -> Tuple[HouseGenome, HouseGenome]:
-    """Ikki ota-onadan ikkita yangi nasl yaratadi (genlarni aralashtirib)."""
     child1 = HouseGenome()
     child2 = HouseGenome()
     
-    # Har bir qavat uchun alohida krossover
     for f_idx in range(min(parent1.story_count(), parent2.story_count())):
-        p1_floor = parent1.floor_genomes[f_idx]
-        p2_floor = parent2.floor_genomes[f_idx]
+        p1 = parent1.floor_genomes[f_idx]
+        p2 = parent2.floor_genomes[f_idx]
         
-        c1_floor = p1_floor.copy()
-        c2_floor = p2_floor.copy()
+        c1 = p1.copy()
+        c2 = p2.copy()
         
-        # Xoll o'lchamlarini o'rtacha qilib olish (yoki tasodifiy birini olish)
         if rng.random() < 0.5:
-            c1_floor.hall_w = p2_floor.hall_w
-            c2_floor.hall_w = p1_floor.hall_w
+            c1.hall_w = p2.hall_w
+            c2.hall_w = p1.hall_w
             
-        # Chap qanot tartibini almashtirish
         if rng.random() < 0.7:
-            c1_floor.left_order = list(p2_floor.left_order)
-            c2_floor.left_order = list(p1_floor.left_order)
-            # Wing assignment ni yangilash
-            for rid in c1_floor.left_order: c1_floor.wing_assignment[rid] = "left"
-            for rid in c2_floor.left_order: c2_floor.wing_assignment[rid] = "left"
+            c1.left_order = list(p1.left_order) + [r for r in p2.left_order if r not in p1.left_order]
+            c2.left_order = list(p2.left_order) + [r for r in p1.left_order if r not in p2.left_order]
+            c1.right_order = list(p1.right_order) + [r for r in p2.right_order if r not in p1.right_order]
+            c2.right_order = list(p2.right_order) + [r for r in p1.right_order if r not in p2.right_order]
+            
+        # Wing assignment ni noldan xavfsiz qurish
+        c1.wing_assignment = {}
+        for rid in c1.left_order: c1.wing_assignment[rid] = "left"
+        for rid in c1.right_order: c1.wing_assignment[rid] = "right"
+        for rid in c1.top_order: c1.wing_assignment[rid] = "top"
+        
+        c2.wing_assignment = {}
+        for rid in c2.left_order: c2.wing_assignment[rid] = "left"
+        for rid in c2.right_order: c2.wing_assignment[rid] = "right"
+        for rid in c2.top_order: c2.wing_assignment[rid] = "top"
 
-        child1.floor_genomes.append(c1_floor)
-        child2.floor_genomes.append(c2_floor)
+        child1.floor_genomes.append(c1)
+        child2.floor_genomes.append(c2)
         
     child1.staircase_slot = rng.choice([parent1.staircase_slot, parent2.staircase_slot])
     child2.staircase_slot = rng.choice([parent1.staircase_slot, parent2.staircase_slot])
