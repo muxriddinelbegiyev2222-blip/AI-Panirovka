@@ -31,27 +31,28 @@ def build_floor_plan(
     if rng is None:
         rng = random.Random()
 
-    req_map = {req.room_type: req for req in requests}
+    # 1. ID bo'yicha xona talablarini lug'atga yig'ish (YANGILANDI)
+    req_map = {req.id: req for req in requests}
 
-    # 1. PlacedRoom obyektlarini yaratish (Hali x,y yo'q)
     all_placed = {}
-    for room_type, wing in genome.wing_assignment.items():
-        if room_type == "xoll":
-            continue
-        req = req_map.get(room_type)
-        if not req:
+    # Genomdagi room_id lar bo'yicha aylanamiz
+    for room_id, wing in genome.wing_assignment.items():
+        req = req_map.get(room_id)
+        
+        # Agar xona topilmasa yoki bu Xoll bo'lsa, o'tkazib yuboramiz
+        if not req or req.room_type == "xoll":
             continue
             
-        spec = get_room_spec(room_type)
+        spec = get_room_spec(req.room_type)
         w, h = req.width, req.height
         
-        # Genomda aylantirish (rotatsiya) belgilangan bo'lsa, eni va bo'yini almashtiramiz
-        if genome.rotations.get(room_type, False):
+        # Genomda aylantirish (rotatsiya) belgilangan bo'lsa
+        if genome.rotations.get(room_id, False):
             w, h = h, w
             
-        all_placed[room_type] = PlacedRoom(
-            id=f"room_{room_type}",
-            room_type=room_type,
+        all_placed[room_id] = PlacedRoom(
+            id=f"room_{req.room_type}_{room_id}", # Unikal ID yasaymiz
+            room_type=req.room_type,              # Asl turini saqlab qolamiz
             label=req.custom_label or spec.name_uz,
             category=spec.category,
             x=0.0, y=0.0, w=w, h=h,
@@ -62,11 +63,12 @@ def build_floor_plan(
             floor_index=genome.floor_index
         )
 
+    # 2. Qanotlar bo'yicha xonalarni ajratib olish
     left_rooms = [all_placed[rid] for rid in genome.left_order if rid in all_placed]
     right_rooms = [all_placed[rid] for rid in genome.right_order if rid in all_placed]
     top_rooms = [all_placed[rid] for rid in genome.top_order if rid in all_placed]
 
-    # 2. Qanotlarning kengligini aniqlash
+    # 3. Qanotlarning kengligini aniqlash
     W_left = max([r.w for r in left_rooms], default=0.0)
     W_right = max([r.w for r in right_rooms], default=0.0)
     
@@ -75,30 +77,27 @@ def build_floor_plan(
         top_sum_w = sum(r.w for r in top_rooms)
         W_center = max(W_center, top_sum_w)
         
-    # Minimal kengliklarni ta'minlash
     W_left = max(W_left, 3.6) if left_rooms else 0.0
     W_right = max(W_right, 3.6) if right_rooms else 0.0
     W_center = max(W_center, 3.6)
     
-    # 3. Qatorlarga terish (packing)
+    # 4. Qatorlarga terish (packing)
     left_rows = pack_wing_rooms(left_rooms, W_left, rng)
     right_rows = pack_wing_rooms(right_rooms, W_right, rng)
 
     H_left_raw = sum(row["height"] for row in left_rows)
     H_right_raw = sum(row["height"] for row in right_rows)
     
-    # Tepa blok (Top band) balandligi
     H_top = max([r.h for r in top_rooms], default=0.0)
     min_hall_h = 5.5
     
-    # Umumiy balandlik eng katta qanot yoki Tepa blok + Xoll yig'indisiga teng bo'ladi
     total_H = max(H_left_raw, H_right_raw, H_top + min_hall_h, 9.0)
     
-    # Qatorlarni umumiy balandlikka proporsional cho'zish
+    # Qatorlarni cho'zish
     stretch_rows_to_height(left_rows, total_H)
     stretch_rows_to_height(right_rows, total_H)
 
-    # 4. Koordinatalarni berish (Joylashtirish)
+    # 5. Koordinatalarni berish (Joylashtirish)
     placed_rooms = []
     
     # --- CHAP QANOT ---
@@ -190,7 +189,7 @@ def build_floor_plan(
 
     total_W = W_left + W_center + W_right
 
-    # 5. Eshik va derazalarni generatsiya qilish
+    # 6. Eshik va derazalarni generatsiya qilish
     doors = _generate_doors(placed_rooms, total_W, total_H)
     windows = _generate_windows(placed_rooms, total_W, total_H)
 
@@ -218,24 +217,21 @@ def _generate_doors(rooms: List[PlacedRoom], total_w: float, total_h: float) -> 
     transit_rooms = [r for r in rooms if r.category == "transit"]
     hall = next((r for r in transit_rooms if r.room_type == "xoll"), None)
 
-    # 1. Asosiy kirish eshigi
     if hall:
         doors.append(DoorSpec(
             x=hall.x + hall.w / 2.0, y=0.0, width=1.4, orientation="H",
             swing_dir="+y", hinge_side="left", is_double=True, is_exterior=True
         ))
 
-    # 2. Har bir xona uchun eshik (Koridor yoki Xoll bilan umumiy devor orqali)
     for rm in rooms:
         if rm.category == "transit":
             continue
 
-        spec = get_room_spec(rm.room_type)
+        spec = get_room_spec(rm.room_type) # Bu yerda rm.room_type (masalan, "sanuzel") ishlatiladi
         d_width = min(spec.door_width, min(rm.w, rm.h) * 0.55)
         d_width = max(0.70, round(d_width, 2))
 
         placed = False
-        # Eng avval koridor va xollga qidiramiz
         for tr in transit_rooms:
             shared = find_shared_wall(rm, tr)
             if shared:
@@ -252,9 +248,9 @@ def _generate_doors(rooms: List[PlacedRoom], total_w: float, total_h: float) -> 
                     placed = True
                     break
         
-        # Agar koridorga eshik ochib bo'lmasa, qo'shni xonaga ochamiz
         if not placed:
             for neighbor in rooms:
+                # Endi rm.id lar unikal bo'lgani uchun bu tekshiruv 100% to'g'ri ishlaydi
                 if neighbor.id == rm.id or neighbor.category == "transit":
                     continue
                 shared = find_shared_wall(rm, neighbor)
@@ -283,7 +279,7 @@ def _generate_windows(rooms: List[PlacedRoom], total_w: float, total_h: float) -
             if wall == "bottom":
                 w_len = min(1.8, rm.w * 0.5)
                 windows.append(WindowSpec(x=rm.x + rm.w/2, y=0.0, length=w_len, orientation="H", wall_side="bottom", room_id=rm.id))
-                break # Bitta deraza yetarli
+                break
             elif wall == "top":
                 w_len = min(1.8, rm.w * 0.5)
                 windows.append(WindowSpec(x=rm.x + rm.w/2, y=total_h, length=w_len, orientation="H", wall_side="top", room_id=rm.id))
