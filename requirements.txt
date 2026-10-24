@@ -1,0 +1,20 @@
+# AI Arxitektor Pro v4.0 — Python 3.10+ tavsiya etiladi
+
+# Geometriya va numerika
+numpy>=1.24,<3.0
+
+# Chizma renderer (PNG / PDF)
+matplotlib>=3.7,<4.0
+
+# GUI
+# tkinter — stdlib (pip kerak emas, Python bilan keladi)
+Pillow>=10.0,<11.0
+
+# Test
+pytest>=7.4,<9.0
+pytest-cov>=4.1,<6.0
+
+# Ixtiyoriy (kelajakda):
+# PyQt6>=6.6            # agar Tkinter o'rniga PyQt ishlatmoqchi bo'lsangiz
+# ezdxf>=1.1            # agar DXF o'rniga to'liq CAD kutubxonasi kerak bo'lsa
+# shapely>=2.0          # agar geometriya tekshiruvi uchun kerak bo'lsa
